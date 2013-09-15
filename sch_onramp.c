@@ -23,12 +23,12 @@ struct onramp_client_queue {
 }; /* please try to keep this structure <= 64 bytes */
 
 struct onramp_sched_data {
-	struct onramp_client_queue *flows;	/* Flows table [max_clients] */
-	u32		*backlogs;	/* backlog table [max_clients] */
-	u32		max_clients;	/* number of flows */
-	u32		perturbation;	/* hash perturbation */
-	u32		quantum;	/* psched_mtu(qdisc_dev(sch)); */
-	u32		drop_overlimit;
+	struct onramp_client_queue *queue_table;/* Client queues table [max_clients] */
+	u32		*backlogs;		/* backlog table [max_clients] */
+	u32		max_clients;		/* maximum number of clients */
+	u32		perturbation;		/* hash perturbation */
+	u32		quantum;		/* psched_mtu(qdisc_dev(sch)); */
+	u32		drop_overlimit;		/* Number of packets dropped due to queue overflow */
 	u32		clients_so_far;		/* Total number of clients seen so far */
 
 	struct list_head active_clients;	/* list of currently active clients */
@@ -86,7 +86,7 @@ static unsigned int onramp_drop(struct Qdisc *sch)
 	struct onramp_client_queue *flow;
 
 	/* Queue is full! Find the fat flow and drop packet from it.
-	 * This might sound expensive, but with 1024 flows, we scan
+	 * This might sound expensive, but with 1024 queues, we scan
 	 * 4KB of memory, and we dont need to handle a complex tree
 	 * in fast path (packet queue/enqueue) with many cache misses.
 	 */
@@ -96,7 +96,7 @@ static unsigned int onramp_drop(struct Qdisc *sch)
 			idx = i;
 		}
 	}
-	flow = &q->flows[idx];
+	flow = &q->queue_table[idx];
 	skb = dequeue_head(flow);
 	len = qdisc_pkt_len(skb);
 	q->backlogs[idx] -= len;
@@ -124,7 +124,7 @@ static int onramp_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	}
 	idx--;
 
-	flow = &q->flows[idx];
+	flow = &q->queue_table[idx];
 	flow_queue_add(flow, skb);
 	q->backlogs[idx] += qdisc_pkt_len(skb);
 	sch->qstats.backlog += qdisc_pkt_len(skb);
@@ -160,7 +160,7 @@ static struct sk_buff *dequeue_from_flow(struct Qdisc *sch, struct onramp_client
 
 	if (flow->head) {
 		skb = dequeue_head(flow);
-		q->backlogs[flow - q->flows] -= qdisc_pkt_len(skb);
+		q->backlogs[flow - q->queue_table] -= qdisc_pkt_len(skb);
 		sch->q.qlen--;
 	}
 	return skb;
@@ -247,7 +247,7 @@ static void onramp_destroy(struct Qdisc *sch)
 	struct onramp_sched_data *q = qdisc_priv(sch);
 
 	onramp_free(q->backlogs);
-	onramp_free(q->flows);
+	onramp_free(q->queue_table);
 }
 
 static int onramp_init(struct Qdisc *sch, struct nlattr *opt)
@@ -267,18 +267,18 @@ static int onramp_init(struct Qdisc *sch, struct nlattr *opt)
 			return err;
 	}
 
-	if (!q->flows) {
-		q->flows = onramp_zalloc(q->max_clients *
+	if (!q->queue_table) {
+		q->queue_table = onramp_zalloc(q->max_clients *
 					   sizeof(struct onramp_client_queue));
-		if (!q->flows)
+		if (!q->queue_table)
 			return -ENOMEM;
 		q->backlogs = onramp_zalloc(q->max_clients * sizeof(u32));
 		if (!q->backlogs) {
-			onramp_free(q->flows);
+			onramp_free(q->queue_table);
 			return -ENOMEM;
 		}
 		for (i = 0; i < q->max_clients; i++) {
-			struct onramp_client_queue *flow = q->flows + i;
+			struct onramp_client_queue *flow = q->queue_table + i;
 
 			INIT_LIST_HEAD(&flow->pkt_chain);
 		}
