@@ -32,7 +32,6 @@ struct onramp_sched_data {
 	u32		new_flow_count;
 
 	struct list_head new_flows;	/* list of new flows */
-	struct list_head old_flows;	/* list of old flows */
 };
 
 static unsigned int onramp_hash(const struct onramp_sched_data *q,
@@ -184,15 +183,13 @@ static struct sk_buff *onramp_dequeue(struct Qdisc *sch)
 begin:
 	head = &q->new_flows;
 	if (list_empty(head)) {
-		head = &q->old_flows;
-		if (list_empty(head))
-			return NULL;
+		return NULL;
 	}
 	flow = list_first_entry(head, struct onramp_flow, flowchain);
 
 	if (flow->deficit <= 0) {
 		flow->deficit += q->quantum;
-		list_move_tail(&flow->flowchain, &q->old_flows);
+		list_move_tail(&flow->flowchain, &q->new_flows);
 		goto begin;
 	}
 
@@ -203,11 +200,8 @@ begin:
 	   because we no longer drop here */
 
 	if (!skb) {
-		/* force a pass through old_flows to prevent starvation */
-		if ((head == &q->new_flows) && !list_empty(&q->old_flows))
-			list_move_tail(&flow->flowchain, &q->old_flows);
-		else
-			list_del_init(&flow->flowchain);
+		/* Remove the flow from the list */
+		list_del_init(&flow->flowchain);
 		goto begin;
 	}
 	qdisc_bstats_update(sch, skb);
@@ -272,7 +266,6 @@ static int onramp_init(struct Qdisc *sch, struct nlattr *opt)
 	q->quantum = psched_mtu(qdisc_dev(sch));
 	q->perturbation = net_random();
 	INIT_LIST_HEAD(&q->new_flows);
-	INIT_LIST_HEAD(&q->old_flows);
 
 	if (opt) {
 		int err = onramp_change(sch, opt);
