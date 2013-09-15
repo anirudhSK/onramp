@@ -13,7 +13,6 @@
 #include <net/netlink.h>
 #include <net/pkt_sched.h>
 #include <net/flow_keys.h>
-#include <net/codel.h>
 
 struct onramp_flow {
 	struct sk_buff	  *head;
@@ -21,7 +20,6 @@ struct onramp_flow {
 	struct list_head  flowchain;
 	int		  deficit;
 	u32		  dropped; /* number of drops (or ECN marks) on this flow */
-	struct codel_vars cvars;
 }; /* please try to keep this structure <= 64 bytes */
 
 struct onramp_sched_data {
@@ -30,8 +28,6 @@ struct onramp_sched_data {
 	u32		flows_cnt;	/* number of flows */
 	u32		perturbation;	/* hash perturbation */
 	u32		quantum;	/* psched_mtu(qdisc_dev(sch)); */
-	struct codel_params cparams;
-	struct codel_stats cstats;
 	u32		drop_overlimit;
 	u32		new_flow_count;
 
@@ -135,7 +131,6 @@ static int onramp_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	}
 	idx--;
 
-	codel_set_enqueue_time(skb);
 	flow = &q->flows[idx];
 	flow_queue_add(flow, skb);
 	q->backlogs[idx] += qdisc_pkt_len(skb);
@@ -162,17 +157,14 @@ static int onramp_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	return NET_XMIT_SUCCESS;
 }
 
-/* This is the specific function called from codel_dequeue()
- * to dequeue a packet from queue. Note: backlog is handled in
- * codel, we dont need to reduce it here.
+/* This is the function to dequeue a packet from a specific flow.
+ * Anirudh: Qdisc::backlog was handled in codel, but we are ignoring it completely.
  */
-static struct sk_buff *dequeue(struct codel_vars *vars, struct Qdisc *sch)
+static struct sk_buff *dequeue_from_flow(struct Qdisc *sch, struct onramp_flow* flow)
 {
 	struct onramp_sched_data *q = qdisc_priv(sch);
-	struct onramp_flow *flow;
 	struct sk_buff *skb = NULL;
 
-	flow = container_of(vars, struct onramp_flow, cvars);
 	if (flow->head) {
 		skb = dequeue_head(flow);
 		q->backlogs[flow - q->flows] -= qdisc_pkt_len(skb);
@@ -187,7 +179,6 @@ static struct sk_buff *onramp_dequeue(struct Qdisc *sch)
 	struct sk_buff *skb;
 	struct onramp_flow *flow;
 	struct list_head *head;
-	u32 prev_drop_count, prev_ecn_mark;
 
 	printk("Entering onramp_dequeue\n");
 begin:
@@ -205,14 +196,11 @@ begin:
 		goto begin;
 	}
 
-	prev_drop_count = q->cstats.drop_count;
-	prev_ecn_mark = q->cstats.ecn_mark;
 
-	skb = codel_dequeue(sch, &q->cparams, &flow->cvars, &q->cstats,
-			    dequeue);
+	skb = dequeue_from_flow(sch, flow);
 
-	flow->dropped += q->cstats.drop_count - prev_drop_count;
-	flow->dropped += q->cstats.ecn_mark - prev_ecn_mark;
+	/* Anirudh: flow->dropped doesn't need to be updated
+	   because we no longer drop here */
 
 	if (!skb) {
 		/* force a pass through old_flows to prevent starvation */
@@ -227,10 +215,8 @@ begin:
 	/* We cant call qdisc_tree_decrease_qlen() if our qlen is 0,
 	 * or HTB crashes. Defer it for next round.
 	 */
-	if (q->cstats.drop_count && sch->q.qlen) {
-		qdisc_tree_decrease_qlen(sch, q->cstats.drop_count);
-		q->cstats.drop_count = 0;
-	}
+	/* Anirudh: Do we need to call qdisc_tree_decrease_qlen()? */
+
 	printk("Returning a valid skb\n");
 	return skb;
 }
@@ -287,9 +273,6 @@ static int onramp_init(struct Qdisc *sch, struct nlattr *opt)
 	q->perturbation = net_random();
 	INIT_LIST_HEAD(&q->new_flows);
 	INIT_LIST_HEAD(&q->old_flows);
-	codel_params_init(&q->cparams);
-	codel_stats_init(&q->cstats);
-	q->cparams.ecn = true;
 
 	if (opt) {
 		int err = onramp_change(sch, opt);
@@ -311,7 +294,6 @@ static int onramp_init(struct Qdisc *sch, struct nlattr *opt)
 			struct onramp_flow *flow = q->flows + i;
 
 			INIT_LIST_HEAD(&flow->flowchain);
-			codel_vars_init(&flow->cvars);
 		}
 	}
 
