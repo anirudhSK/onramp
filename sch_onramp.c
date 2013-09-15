@@ -44,6 +44,7 @@ static unsigned int onramp_hash(const struct onramp_sched_data *q,
 	hash = jhash_2words((__force u32)keys.dst,
 			    (__force u32)keys.ip_proto,
 			    q->perturbation);
+	printk("Hash value is %u\n", hash);
 	return ((u64)hash * q->max_clients) >> 32;
 }
 
@@ -116,6 +117,7 @@ static int onramp_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	int uninitialized_var(ret);
 
 	idx = onramp_classify(skb, sch, &ret);
+	printk("idx on enqueue is %d\n", idx);
 	if (idx == 0) {
 		if (ret & __NET_XMIT_BYPASS)
 			sch->qstats.drops++;
