@@ -26,6 +26,7 @@ struct onramp_sched_data {
 	struct onramp_client_queue *queue_table;/* Client queues table [max_clients] */
 	u32		*backlogs;		/* backlog table [max_clients] */
 	u32		max_clients;		/* maximum number of clients */
+	u32		max_flows;		/* maximum number of flows per client */
 	u32		perturbation;		/* hash perturbation */
 	u32		quantum;		/* psched_mtu(qdisc_dev(sch)); */
 	u32		drop_overlimit;		/* Number of packets dropped due to queue overflow */
@@ -33,6 +34,20 @@ struct onramp_sched_data {
 
 	struct list_head active_clients;	/* list of currently active clients */
 };
+
+static unsigned int onramp_flow_hash(const struct onramp_sched_data *q,
+				     const struct sk_buff *skb)
+{
+	struct flow_keys keys;
+	unsigned int hash;
+
+	skb_flow_dissect(skb, &keys);
+	hash = jhash_2words((__force u32)keys.ports,
+			    (__force u32)keys.ip_proto,
+			    q->perturbation);
+	printk("Flow hash value is %u\n", hash);
+	return ((u64)hash * q->max_flows) >> 32;
+}
 
 static unsigned int onramp_client_hash(const struct onramp_sched_data *q,
 				       const struct sk_buff *skb)
@@ -252,6 +267,7 @@ static int onramp_init(struct Qdisc *sch, struct nlattr *opt)
 
 	sch->limit = 10*1024;
 	q->max_clients = 1024;
+	q->max_flows   = 1024;
 	q->quantum = psched_mtu(qdisc_dev(sch));
 	q->perturbation = net_random();
 	INIT_LIST_HEAD(&q->active_clients);
