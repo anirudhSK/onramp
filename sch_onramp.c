@@ -29,7 +29,7 @@ struct onramp_sched_data {
 	u32		perturbation;	/* hash perturbation */
 	u32		quantum;	/* psched_mtu(qdisc_dev(sch)); */
 	u32		drop_overlimit;
-	u32		new_flow_count;
+	u32		clients_so_far;		/* Total number of clients seen so far */
 
 	struct list_head active_clients;	/* list of currently active clients */
 };
@@ -131,7 +131,7 @@ static int onramp_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 
 	if (list_empty(&flow->pkt_chain)) {
 		list_add_tail(&flow->pkt_chain, &q->active_clients);
-		q->new_flow_count++;
+		q->clients_so_far++;
 		flow->deficit = q->quantum;
 		flow->dropped = 0;
 	}
