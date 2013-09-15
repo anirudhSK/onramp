@@ -34,8 +34,8 @@ struct onramp_sched_data {
 	struct list_head active_clients;	/* list of currently active clients */
 };
 
-static unsigned int onramp_hash(const struct onramp_sched_data *q,
-				  const struct sk_buff *skb)
+static unsigned int onramp_client_hash(const struct onramp_sched_data *q,
+				       const struct sk_buff *skb)
 {
 	struct flow_keys keys;
 	unsigned int hash;
@@ -44,15 +44,8 @@ static unsigned int onramp_hash(const struct onramp_sched_data *q,
 	hash = jhash_2words((__force u32)keys.dst,
 			    (__force u32)keys.ip_proto,
 			    q->perturbation);
-	printk("Hash value is %u\n", hash);
+	printk("Client hash value is %u\n", hash);
 	return ((u64)hash * q->max_clients) >> 32;
-}
-
-static unsigned int onramp_classify(struct sk_buff *skb, struct Qdisc *sch,
-				      int *qerr)
-{
-	struct onramp_sched_data *q = qdisc_priv(sch);
-	return onramp_hash(q, skb) + 1;
 }
 
 /* helper functions : might be changed when/if skb use a standard list_head */
@@ -115,8 +108,8 @@ static int onramp_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	unsigned int idx;
 	struct onramp_client_queue *client_queue;
 	int uninitialized_var(ret);
+	idx = onramp_client_hash(q, skb) + 1;
 
-	idx = onramp_classify(skb, sch, &ret);
 	printk("idx on enqueue is %d\n", idx);
 	if (idx == 0) {
 		if (ret & __NET_XMIT_BYPASS)
