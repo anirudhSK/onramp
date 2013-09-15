@@ -51,12 +51,6 @@ static unsigned int onramp_classify(struct sk_buff *skb, struct Qdisc *sch,
 				      int *qerr)
 {
 	struct onramp_sched_data *q = qdisc_priv(sch);
-
-	if (TC_H_MAJ(skb->priority) == sch->handle &&
-	    TC_H_MIN(skb->priority) > 0 &&
-	    TC_H_MIN(skb->priority) <= q->flows_cnt)
-		return TC_H_MIN(skb->priority);
-
 	return onramp_hash(q, skb) + 1;
 }
 
