@@ -243,68 +243,9 @@ static void onramp_reset(struct Qdisc *sch)
 		kfree_skb(skb);
 }
 
-static const struct nla_policy onramp_policy[TCA_FQ_CODEL_MAX + 1] = {
-	[TCA_FQ_CODEL_TARGET]	= { .type = NLA_U32 },
-	[TCA_FQ_CODEL_LIMIT]	= { .type = NLA_U32 },
-	[TCA_FQ_CODEL_INTERVAL]	= { .type = NLA_U32 },
-	[TCA_FQ_CODEL_ECN]	= { .type = NLA_U32 },
-	[TCA_FQ_CODEL_FLOWS]	= { .type = NLA_U32 },
-	[TCA_FQ_CODEL_QUANTUM]	= { .type = NLA_U32 },
-};
-
 static int onramp_change(struct Qdisc *sch, struct nlattr *opt)
 {
-	struct onramp_sched_data *q = qdisc_priv(sch);
-	struct nlattr *tb[TCA_FQ_CODEL_MAX + 1];
-	int err;
-
-	if (!opt)
-		return -EINVAL;
-
-	err = nla_parse_nested(tb, TCA_FQ_CODEL_MAX, opt, onramp_policy);
-	if (err < 0)
-		return err;
-	if (tb[TCA_FQ_CODEL_FLOWS]) {
-		if (q->flows)
-			return -EINVAL;
-		q->flows_cnt = nla_get_u32(tb[TCA_FQ_CODEL_FLOWS]);
-		if (!q->flows_cnt ||
-		    q->flows_cnt > 65536)
-			return -EINVAL;
-	}
-	sch_tree_lock(sch);
-
-	if (tb[TCA_FQ_CODEL_TARGET]) {
-		u64 target = nla_get_u32(tb[TCA_FQ_CODEL_TARGET]);
-
-		q->cparams.target = (target * NSEC_PER_USEC) >> CODEL_SHIFT;
-	}
-
-	if (tb[TCA_FQ_CODEL_INTERVAL]) {
-		u64 interval = nla_get_u32(tb[TCA_FQ_CODEL_INTERVAL]);
-
-		q->cparams.interval = (interval * NSEC_PER_USEC) >> CODEL_SHIFT;
-	}
-
-	if (tb[TCA_FQ_CODEL_LIMIT])
-		sch->limit = nla_get_u32(tb[TCA_FQ_CODEL_LIMIT]);
-
-	if (tb[TCA_FQ_CODEL_ECN])
-		q->cparams.ecn = !!nla_get_u32(tb[TCA_FQ_CODEL_ECN]);
-
-	if (tb[TCA_FQ_CODEL_QUANTUM])
-		q->quantum = max(256U, nla_get_u32(tb[TCA_FQ_CODEL_QUANTUM]));
-
-	while (sch->q.qlen > sch->limit) {
-		struct sk_buff *skb = onramp_dequeue(sch);
-
-		kfree_skb(skb);
-		q->cstats.drop_count++;
-	}
-	qdisc_tree_decrease_qlen(sch, q->cstats.drop_count);
-	q->cstats.drop_count = 0;
-
-	sch_tree_unlock(sch);
+	printk("Inside onramp_change, ignoring all requests for change\n");
 	return 0;
 }
 
