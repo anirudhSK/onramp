@@ -42,9 +42,9 @@ static unsigned int onramp_hash(const struct onramp_sched_data *q,
 	unsigned int hash;
 
 	skb_flow_dissect(skb, &keys);
-	hash = jhash_3words((__force u32)keys.dst,
-			    (__force u32)keys.src ^ keys.ip_proto,
-			    (__force u32)keys.ports, q->perturbation);
+	hash = jhash_2words((__force u32)keys.dst,
+			    (__force u32)keys.ip_proto,
+			    q->perturbation);
 	return ((u64)hash * q->flows_cnt) >> 32;
 }
 
