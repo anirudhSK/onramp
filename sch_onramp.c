@@ -72,6 +72,11 @@ static inline struct sk_buff *dequeue_from_client(struct onramp_sched_data* q,
 	int flow_id = q->singleton_fid;
 	printk("Dequeuing from flow_id %d\n", flow_id);
 	struct sk_buff* skb = dequeue_from_flow(&client_queue->flow_table[flow_id]);
+	if (client_queue->flow_table[flow_id].head == NULL) {
+		/* Reset Attained service */
+		printk("Resetting attained service here\n");
+		client_queue->flow_table[flow_id].attained_service = 0;
+	}
 	/* TESTING CODE: Set the above to 1 to check */
 	/* Check all flows to see if the queue is now empty */
 	int i = 0;
