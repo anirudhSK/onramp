@@ -13,13 +13,14 @@
 #include <net/netlink.h>
 #include <net/pkt_sched.h>
 #include <net/flow_keys.h>
+#include "flow_queue.h"
 
 struct onramp_client_queue {
-	struct sk_buff	  *head;
-	struct sk_buff	  *tail;
+	int		  empty;
+	struct onramp_flow_queue *flow_table;   /* per-client flow table */
 	struct list_head  pkt_chain;
 	int		  deficit;
-	u32		  dropped; /* number of drops on this client */
+	u32		  dropped;	        /* number of drops on this client */
 }; /* please try to keep this structure <= 64 bytes */
 
 struct onramp_sched_data {
@@ -63,28 +64,39 @@ static unsigned int onramp_client_hash(const struct onramp_sched_data *q,
 	return ((u64)hash * q->max_clients) >> 32;
 }
 
-/* helper functions : might be changed when/if skb use a standard list_head */
-
-/* remove one skb from head of slot queue */
-static inline struct sk_buff *dequeue_head(struct onramp_client_queue *client_queue)
+/* Remove one skb from head of slot queue */
+static inline struct sk_buff *dequeue_from_client(struct onramp_sched_data* q,
+						  struct onramp_client_queue *client_queue)
 {
-	struct sk_buff *skb = client_queue->head;
-
-	client_queue->head = skb->next;
-	skb->next = NULL;
+	int flow_id = 10;
+	printk("Dequeuing from flow_id %d\n", flow_id);
+	struct sk_buff* skb = dequeue_from_flow(&client_queue->flow_table[flow_id]);
+	/* TESTING CODE: Set the above to 1 to check */
+	/* Check all flows to see if the queue is now empty */
+	int i = 0;
+	for (i = 0; i < q->max_flows; i++) {
+		if (client_queue->flow_table[i].head) {
+			/* non-empty */
+			client_queue->empty = 0;
+			return skb;
+		}
+	}
+	/* All constituent flows are empty */
+	client_queue->empty = 1;
 	return skb;
 }
 
-/* add skb to client_queue (tail add) */
-static inline void client_queue_add(struct onramp_client_queue *client_queue,
-				    struct sk_buff *skb)
+/* Add skb to client_queue (tail add) */
+static inline void enqueue_into_client(struct onramp_sched_data* q,
+				       struct onramp_client_queue *client_queue,
+				       struct sk_buff *skb)
 {
-	if (client_queue->head == NULL)
-		client_queue->head = skb;
-	else
-		client_queue->tail->next = skb;
-	client_queue->tail = skb;
-	skb->next = NULL;
+	//int flow_id = onramp_flow_hash(q, skb);
+	// TESTING CODE:
+	int flow_id = 10;
+	client_queue->empty = 0;
+	printk("Enqueuing into flow_id %d\n", flow_id);
+	enqueue_into_flow(&client_queue->flow_table[flow_id], skb);
 }
 
 static unsigned int onramp_drop(struct Qdisc *sch)
@@ -106,7 +118,7 @@ static unsigned int onramp_drop(struct Qdisc *sch)
 		}
 	}
 	client_queue = &q->queue_table[idx];
-	skb = dequeue_head(client_queue);
+	skb = dequeue_from_client(q, client_queue);
 	len = qdisc_pkt_len(skb);
 	q->backlogs[idx] -= len;
 	kfree_skb(skb);
@@ -125,7 +137,6 @@ static int onramp_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	int uninitialized_var(ret);
 	idx = onramp_client_hash(q, skb) + 1;
 
-	printk("idx on enqueue is %d\n", idx);
 	if (idx == 0) {
 		if (ret & __NET_XMIT_BYPASS)
 			sch->qstats.drops++;
@@ -134,8 +145,9 @@ static int onramp_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	}
 	idx--;
 
+	printk("idx on enqueue is %d\n", idx);
 	client_queue = &q->queue_table[idx];
-	client_queue_add(client_queue, skb);
+	enqueue_into_client(q, client_queue, skb);
 	q->backlogs[idx] += qdisc_pkt_len(skb);
 	sch->qstats.backlog += qdisc_pkt_len(skb);
 
@@ -144,6 +156,7 @@ static int onramp_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 		q->clients_so_far++;
 		client_queue->deficit = q->quantum;
 		client_queue->dropped = 0;
+		client_queue->empty   = 0;
 	}
 	if (++sch->q.qlen <= sch->limit)
 		return NET_XMIT_SUCCESS;
@@ -168,8 +181,8 @@ static struct sk_buff *dequeue_from_client_queue(struct Qdisc *sch, struct onram
 	struct onramp_sched_data *q = qdisc_priv(sch);
 	struct sk_buff *skb = NULL;
 
-	if (client_queue->head) {
-		skb = dequeue_head(client_queue);
+	if (!client_queue->empty) {
+		skb = dequeue_from_client(q, client_queue);
 		q->backlogs[client_queue - q->queue_table] -= qdisc_pkt_len(skb);
 		sch->q.qlen--;
 	}
@@ -266,8 +279,8 @@ static int onramp_init(struct Qdisc *sch, struct nlattr *opt)
 	int i;
 
 	sch->limit = 10*1024;
-	q->max_clients = 1024;
-	q->max_flows   = 1024;
+	q->max_clients = 64;
+	q->max_flows   = 64;
 	q->quantum = psched_mtu(qdisc_dev(sch));
 	q->perturbation = net_random();
 	INIT_LIST_HEAD(&q->active_clients);
@@ -292,6 +305,12 @@ static int onramp_init(struct Qdisc *sch, struct nlattr *opt)
 			struct onramp_client_queue *client_queue = q->queue_table + i;
 
 			INIT_LIST_HEAD(&client_queue->pkt_chain);
+			client_queue->flow_table = onramp_zalloc(q->max_flows * sizeof(struct onramp_flow_queue));
+			if (!client_queue->flow_table) {
+				onramp_free(client_queue->flow_table);
+				return -ENOMEM;
+			}
+			client_queue->empty = 1;
 		}
 	}
 
