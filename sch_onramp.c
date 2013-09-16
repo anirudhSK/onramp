@@ -34,6 +34,7 @@ struct onramp_sched_data {
 	u32		clients_so_far;		/* Total number of clients seen so far */
 
 	struct list_head active_clients;	/* list of currently active clients */
+	int 		singleton_fid;		/* For TESTING only */
 };
 
 static unsigned int onramp_flow_hash(const struct onramp_sched_data *q,
@@ -68,7 +69,7 @@ static unsigned int onramp_client_hash(const struct onramp_sched_data *q,
 static inline struct sk_buff *dequeue_from_client(struct onramp_sched_data* q,
 						  struct onramp_client_queue *client_queue)
 {
-	int flow_id = 10;
+	int flow_id = q->singleton_fid;
 	printk("Dequeuing from flow_id %d\n", flow_id);
 	struct sk_buff* skb = dequeue_from_flow(&client_queue->flow_table[flow_id]);
 	/* TESTING CODE: Set the above to 1 to check */
@@ -93,7 +94,10 @@ static inline void enqueue_into_client(struct onramp_sched_data* q,
 {
 	//int flow_id = onramp_flow_hash(q, skb);
 	// TESTING CODE:
-	int flow_id = 10;
+	if (q->singleton_fid == 0) {
+		q->singleton_fid = onramp_flow_hash(q, skb);
+	}
+	int flow_id = q->singleton_fid;
 	client_queue->empty = 0;
 	printk("Enqueuing into flow_id %d\n", flow_id);
 	enqueue_into_flow(&client_queue->flow_table[flow_id], skb);
