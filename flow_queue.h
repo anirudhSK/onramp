@@ -2,7 +2,6 @@ struct onramp_flow_queue {
 	struct sk_buff	  *head;
 	struct sk_buff	  *tail;
 	int		  attained_service;
-	u32		  dropped;	       /* number of drops on this flow */
 }; /* please try to keep this structure <= 64 bytes */
 
 /* Helper functions : might be changed when/if skb use a standard list_head */
