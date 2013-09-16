@@ -56,6 +56,25 @@ static int pick_flow_from_client(const struct onramp_sched_data *q,
 	return argmin;
 }
 
+static int pick_most_serviced_flow(const struct onramp_sched_data *q,
+				   struct onramp_client_queue *client_queue)
+{
+	int i = 0;
+	int argmax = -1;
+	u64 maxservice = 0;
+	printk("maxservice initialized to %llu\n", maxservice);
+
+	for (i = 0; i < q->max_flows; i++) {
+		if (client_queue->flow_table[i].head) {
+			/* If non-empty */
+			if (client_queue->flow_table[i].attained_service > maxservice) {
+				maxservice = client_queue->flow_table[i].attained_service;
+				argmax = i;
+			}
+		}
+	}
+	return argmax;
+}
 static unsigned int onramp_flow_hash(const struct onramp_sched_data *q,
 				     const struct sk_buff *skb)
 {
@@ -95,11 +114,6 @@ static inline struct sk_buff *dequeue_from_client(struct onramp_sched_data* q,
 	}
 	printk("Dequeuing from flow_id %d\n", flow_id);
 	struct sk_buff* skb = dequeue_from_flow(&client_queue->flow_table[flow_id]);
-	if (client_queue->flow_table[flow_id].head == NULL) {
-		/* Reset Attained service */
-		printk("Resetting attained service here\n");
-		client_queue->flow_table[flow_id].attained_service = 0;
-	}
 	/* Check all flows to see if the queue is now empty */
 	int i = 0;
 	for (i = 0; i < q->max_flows; i++) {
@@ -114,6 +128,30 @@ static inline struct sk_buff *dequeue_from_client(struct onramp_sched_data* q,
 	return skb;
 }
 
+/* Remove one skb from head of slot queue */
+static inline struct sk_buff *drop_from_most_serviced(struct onramp_sched_data* q,
+						      struct onramp_client_queue *client_queue)
+{
+	int flow_id = pick_most_serviced_flow(q, client_queue);
+	if (flow_id == -1) {
+		printk("No packets to drop\n");
+		return NULL;
+	}
+	printk("Dropping from flow_id %d\n", flow_id);
+	struct sk_buff* skb = dequeue_from_flow(&client_queue->flow_table[flow_id]);
+	/* Check all flows to see if the queue is now empty */
+	int i = 0;
+	for (i = 0; i < q->max_flows; i++) {
+		if (client_queue->flow_table[i].head) {
+			/* non-empty */
+			client_queue->empty = 0;
+			return skb;
+		}
+	}
+	/* All constituent flows are empty */
+	client_queue->empty = 1;
+	return skb;
+}
 /* Add skb to client_queue (tail add) */
 static inline int enqueue_into_client(struct onramp_sched_data* q,
 				       struct onramp_client_queue *client_queue,
@@ -150,7 +188,7 @@ static unsigned int onramp_drop(struct Qdisc *sch)
 		}
 	}
 	client_queue = &q->queue_table[idx];
-	skb = dequeue_from_client(q, client_queue); /* TODO: Fix drop strategy */
+	skb = drop_from_most_serviced(q, client_queue);
 	len = qdisc_pkt_len(skb);
 	q->backlogs[idx] -= len;
 	kfree_skb(skb);
