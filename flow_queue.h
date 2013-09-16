@@ -8,9 +8,9 @@ struct onramp_flow_queue {
 /* Dequeue from flow */
 inline struct sk_buff *dequeue_from_flow(struct onramp_flow_queue *flow_queue)
 {
-	/* TODO: Appropriately adjust Las */
 	struct sk_buff *skb = flow_queue->head;
 	flow_queue->head = skb->next;
+	flow_queue->attained_service -= qdisc_pkt_len(skb);
 	skb->next = NULL;
 	return skb;
 }
