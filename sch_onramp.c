@@ -37,6 +37,26 @@ struct onramp_sched_data {
 	int 		singleton_fid;		/* For TESTING only */
 };
 
+static int pick_flow_from_client(const struct onramp_sched_data *q,
+				 struct onramp_client_queue *client_queue)
+{
+	int i = 0;
+	int argmin = -1;
+	u64 minservice = ULLONG_MAX;
+	printk("minservice initialized to %llu\n", minservice);
+
+	for (i = 0; i < q->max_flows; i++) {
+		if (client_queue->flow_table[i].head) {
+			/* If non-empty */
+			if (client_queue->flow_table[i].attained_service < minservice) {
+				minservice = client_queue->flow_table[i].attained_service;
+				argmin = i;
+			}
+		}
+	}
+	return argmin;
+}
+
 static unsigned int onramp_flow_hash(const struct onramp_sched_data *q,
 				     const struct sk_buff *skb)
 {
@@ -70,7 +90,7 @@ static inline struct sk_buff *dequeue_from_client(struct onramp_sched_data* q,
 						  struct onramp_client_queue *client_queue)
 {
 	int flow_id = q->singleton_fid;
-	printk("Dequeuing from flow_id %d\n", flow_id);
+	printk("Dequeuing from flow_id %d, pick_flow_from_client returned %d\n", flow_id, pick_flow_from_client(q, client_queue));
 	struct sk_buff* skb = dequeue_from_flow(&client_queue->flow_table[flow_id]);
 	if (client_queue->flow_table[flow_id].head == NULL) {
 		/* Reset Attained service */
