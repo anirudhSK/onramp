@@ -163,6 +163,7 @@ static inline int enqueue_into_client(struct onramp_sched_data* q,
 		return 1;
 		/* Borrowed from Eric Dumazet's code */
 	}
+	flow_id--;
 	client_queue->empty = 0;
 	printk("Enqueuing into flow_id %d\n", flow_id);
 	enqueue_into_flow(&client_queue->flow_table[flow_id], skb);
