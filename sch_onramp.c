@@ -15,14 +15,16 @@
 #include <net/flow_keys.h>
 #include "flow_queue.h"
 
+/* Structure representing per-client queues */
 struct onramp_client_queue {
-	int		  empty;
+	int		  empty;		/* Is per-client queue empty? */
 	struct onramp_flow_queue *flow_table;   /* per-client flow table */
-	struct list_head  pkt_chain;
-	int		  deficit;
+	struct list_head  pkt_chain;		/* Pointer in linked list of "active_clients" */
+	int		  deficit;		/* Deficit counter for DRR */
 	u32		  dropped;	        /* number of drops on this client */
 }; /* please try to keep this structure <= 64 bytes */
 
+/* Structure representing aggregate scheduler */
 struct onramp_sched_data {
 	struct onramp_client_queue *queue_table;/* Client queues table [max_clients] */
 	u32		*backlogs;		/* backlog table [max_clients] */
@@ -32,12 +34,13 @@ struct onramp_sched_data {
 	u32		quantum;		/* psched_mtu(qdisc_dev(sch)); */
 	u32		drop_overlimit;		/* Number of packets dropped due to queue overflow */
 	u32		clients_so_far;		/* Total number of clients seen so far */
-
 	struct list_head active_clients;	/* list of currently active clients */
 };
 
+/* Pick flow with least attained service from all
+   flows belonging to the same client queue */
 static int pick_flow_from_client(const struct onramp_sched_data *q,
-				 struct onramp_client_queue *client_queue)
+				 const struct onramp_client_queue *client_queue)
 {
 	int i = 0;
 	int argmin = -1;
@@ -46,7 +49,7 @@ static int pick_flow_from_client(const struct onramp_sched_data *q,
 
 	for (i = 0; i < q->max_flows; i++) {
 		if (client_queue->flow_table[i].head) {
-			/* If non-empty */
+			/* Consider only non-empty flows */
 			if (client_queue->flow_table[i].attained_service < minservice) {
 				minservice = client_queue->flow_table[i].attained_service;
 				argmin = i;
@@ -56,8 +59,11 @@ static int pick_flow_from_client(const struct onramp_sched_data *q,
 	return argmin;
 }
 
+/* Converse of the above, pick the flow with most
+   attained service from all flows belonging to the
+   same client queue */
 static int pick_most_serviced_flow(const struct onramp_sched_data *q,
-				   struct onramp_client_queue *client_queue)
+				   const struct onramp_client_queue *client_queue)
 {
 	int i = 0;
 	int argmax = -1;
@@ -66,7 +72,7 @@ static int pick_most_serviced_flow(const struct onramp_sched_data *q,
 
 	for (i = 0; i < q->max_flows; i++) {
 		if (client_queue->flow_table[i].head) {
-			/* If non-empty */
+			/* Consider only non-empty flows */
 			if (client_queue->flow_table[i].attained_service > maxservice) {
 				maxservice = client_queue->flow_table[i].attained_service;
 				argmax = i;
@@ -75,6 +81,9 @@ static int pick_most_serviced_flow(const struct onramp_sched_data *q,
 	}
 	return argmax;
 }
+
+/* Hash socket buffer into a flow bin based on
+   (src, dst) port pair */
 static unsigned int onramp_flow_hash(const struct onramp_sched_data *q,
 				     const struct sk_buff *skb)
 {
@@ -89,6 +98,8 @@ static unsigned int onramp_flow_hash(const struct onramp_sched_data *q,
 	return ((u64)hash * q->max_flows) >> 32;
 }
 
+/* Hash socket buffer into a client bin based on
+   protocol and dst address */
 static unsigned int onramp_client_hash(const struct onramp_sched_data *q,
 				       const struct sk_buff *skb)
 {
@@ -103,8 +114,8 @@ static unsigned int onramp_client_hash(const struct onramp_sched_data *q,
 	return ((u64)hash * q->max_clients) >> 32;
 }
 
-/* Remove one skb from head of slot queue */
-static inline struct sk_buff *dequeue_from_client(struct onramp_sched_data* q,
+/* Remove one skb from client */
+static inline struct sk_buff *dequeue_from_client(const struct onramp_sched_data* q,
 						  struct onramp_client_queue *client_queue)
 {
 	int flow_id = pick_flow_from_client(q, client_queue);
@@ -128,8 +139,8 @@ static inline struct sk_buff *dequeue_from_client(struct onramp_sched_data* q,
 	return skb;
 }
 
-/* Remove one skb from head of slot queue */
-static inline struct sk_buff *drop_from_most_serviced(struct onramp_sched_data* q,
+/* Remove and drop one skb from most serviced flow */
+static inline struct sk_buff *drop_from_most_serviced(const struct onramp_sched_data* q,
 						      struct onramp_client_queue *client_queue)
 {
 	int flow_id = pick_most_serviced_flow(q, client_queue);
@@ -152,6 +163,8 @@ static inline struct sk_buff *drop_from_most_serviced(struct onramp_sched_data* 
 	client_queue->empty = 1;
 	return skb;
 }
+
+/* TODO: Continue here */
 /* Add skb to client_queue (tail add) */
 static inline int enqueue_into_client(struct onramp_sched_data* q,
 				       struct onramp_client_queue *client_queue,
