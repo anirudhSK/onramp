@@ -150,7 +150,7 @@ static inline struct sk_buff *drop_from_most_serviced(const struct onramp_sched_
 	}
 	printk("Dropping from flow_id %d\n", flow_id);
 	struct sk_buff* skb = dequeue_from_flow(&client_queue->flow_table[flow_id]);
-	/* Check all flows to see if the queue is now empty */
+	/* Check all flows to see if the client queue is now empty */
 	int i = 0;
 	for (i = 0; i < q->max_flows; i++) {
 		if (client_queue->flow_table[i].head) {
@@ -166,9 +166,9 @@ static inline struct sk_buff *drop_from_most_serviced(const struct onramp_sched_
 
 /* TODO: Continue here */
 /* Add skb to client_queue (tail add) */
-static inline int enqueue_into_client(struct onramp_sched_data* q,
-				       struct onramp_client_queue *client_queue,
-				       struct sk_buff *skb)
+static inline int enqueue_into_client(const struct onramp_sched_data* q,
+				      struct onramp_client_queue *client_queue,
+				      struct sk_buff *skb)
 {
 	unsigned int flow_id = onramp_flow_hash(q, skb) + 1;
 	if (flow_id == 0) {
@@ -183,6 +183,7 @@ static inline int enqueue_into_client(struct onramp_sched_data* q,
 	return 0;
 }
 
+/* Drop packet because you are over the buffer limit */
 static unsigned int onramp_drop(struct Qdisc *sch)
 {
 	struct onramp_sched_data *q = qdisc_priv(sch);
@@ -213,6 +214,7 @@ static unsigned int onramp_drop(struct Qdisc *sch)
 	return idx;
 }
 
+/* Entry point into this module from the Linux Networking stack */
 static int onramp_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 {
 	struct onramp_sched_data *q = qdisc_priv(sch);
@@ -222,6 +224,7 @@ static int onramp_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	idx = onramp_client_hash(q, skb) + 1;
 
 	if (idx == 0) {
+		/* TODO: Understand this code */
 		if (ret & __NET_XMIT_BYPASS)
 			sch->qstats.drops++;
 		kfree_skb(skb);
@@ -238,6 +241,7 @@ static int onramp_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	sch->qstats.backlog += qdisc_pkt_len(skb);
 
 	if (list_empty(&client_queue->pkt_chain)) {
+		/* client_queue->pkt_chain isn't part of any list */
 		list_add_tail(&client_queue->pkt_chain, &q->active_clients);
 		q->clients_so_far++;
 		client_queue->deficit = q->quantum;
@@ -275,6 +279,8 @@ static struct sk_buff *dequeue_from_client_queue(struct Qdisc *sch, struct onram
 	return skb;
 }
 
+/* Entry point in this module for the network interface:
+   Network interface dequeues in this function */
 static struct sk_buff *onramp_dequeue(struct Qdisc *sch)
 {
 	struct onramp_sched_data *q = qdisc_priv(sch);
@@ -312,12 +318,13 @@ begin:
 	/* We cant call qdisc_tree_decrease_qlen() if our qlen is 0,
 	 * or HTB crashes. Defer it for next round.
 	 */
-	/* Anirudh: Do we need to call qdisc_tree_decrease_qlen()? */
+	/* Anirudh: TODO Do we need to call qdisc_tree_decrease_qlen()? */
 
 	printk("Returning a valid skb\n");
 	return skb;
 }
 
+/* reset function borrowed from old code */
 static void onramp_reset(struct Qdisc *sch)
 {
 	struct sk_buff *skb;
@@ -326,6 +333,7 @@ static void onramp_reset(struct Qdisc *sch)
 		kfree_skb(skb);
 }
 
+/* Entry point in the module when userspace calls tc qdisc change */
 static int onramp_change(struct Qdisc *sch, struct nlattr *opt)
 {
 	printk("Inside onramp_change, ignoring all requests for change\n");
@@ -359,6 +367,7 @@ static void onramp_destroy(struct Qdisc *sch)
 	onramp_free(q->queue_table);
 }
 
+/* Entry point in the module when userspace calls tc qdisc add */
 static int onramp_init(struct Qdisc *sch, struct nlattr *opt)
 {
 	struct onramp_sched_data *q = qdisc_priv(sch);
