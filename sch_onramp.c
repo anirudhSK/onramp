@@ -47,21 +47,7 @@ struct onramp_sched_data {
 static int pick_flow_from_client(const struct onramp_sched_data *q,
 				 const struct onramp_client_queue *client_queue)
 {
-	int i = 0;
-	int argmin = -1;
-	u64 minservice = ULLONG_MAX;
-	printk("minservice initialized to %llu\n", minservice);
-
-	for (i = 0; i < q->max_flows; i++) {
-		if (client_queue->flow_table[i].head) {
-			/* Consider only non-empty flows */
-			if (client_queue->flow_table[i].attained_service < minservice) {
-				minservice = client_queue->flow_table[i].attained_service;
-				argmin = i;
-			}
-		}
-	}
-	return argmin;
+	return pick_flow(&client_queue->flow_queue_tree);
 }
 
 /* Converse of the above, pick the flow with most
@@ -167,7 +153,8 @@ static inline struct sk_buff *dequeue_from_client(const struct onramp_sched_data
 		return NULL;
 	}
 	printk("Dequeuing from flow_id %d\n", flow_id);
-	struct sk_buff* skb = dequeue_from_flow(&client_queue->flow_table[flow_id]);
+	struct sk_buff* skb = dequeue_from_flow(&client_queue->flow_queue_tree,
+						&client_queue->flow_table[flow_id]);
 	/* Check all flows to see if the queue is now empty */
 	int i = 0;
 	for (i = 0; i < q->max_flows; i++) {
@@ -192,7 +179,8 @@ static inline struct sk_buff *drop_from_most_serviced(const struct onramp_sched_
 		return NULL;
 	}
 	printk("Dropping from flow_id %d\n", flow_id);
-	struct sk_buff* skb = dequeue_from_flow(&client_queue->flow_table[flow_id]);
+	struct sk_buff* skb = dequeue_from_flow(&client_queue->flow_queue_tree,
+						&client_queue->flow_table[flow_id]);
 	/* Check all flows to see if the client queue is now empty */
 	int i = 0;
 	for (i = 0; i < q->max_flows; i++) {
@@ -222,7 +210,9 @@ static inline int enqueue_into_client(const struct onramp_sched_data* q,
 	flow_id--;
 	client_queue->empty = 0;
 	printk("Enqueuing into flow_id %d\n", flow_id);
-	enqueue_into_flow(&client_queue->flow_table[flow_id], skb);
+	enqueue_into_flow(&client_queue->flow_queue_tree,
+			  &client_queue->flow_table[flow_id],
+			  skb);
 	return 0;
 }
 
