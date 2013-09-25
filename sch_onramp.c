@@ -13,6 +13,7 @@
 #include <net/netlink.h>
 #include <net/pkt_sched.h>
 #include <net/flow_keys.h>
+#include <linux/rbtree.h>
 #include "flow_queue.h"
 
 /* Structure representing per-client queues */
@@ -22,6 +23,7 @@ struct onramp_client_queue {
 	struct list_head  pkt_chain;		/* Pointer in linked list of "active_clients" */
 	int		  deficit;		/* Deficit counter for DRR */
 	u32		  dropped;	        /* number of drops on this client */
+	struct rb_root    flow_queue_tree;      /* RB tree of flow queues */
 }; /* please try to keep this structure <= 64 bytes */
 
 /* Structure representing aggregate scheduler */
@@ -371,7 +373,7 @@ static void onramp_destroy(struct Qdisc *sch)
 static int onramp_init(struct Qdisc *sch, struct nlattr *opt)
 {
 	struct onramp_sched_data *q = qdisc_priv(sch);
-	int i;
+	int i, j;
 
 	sch->limit = 10*1024;
 	q->max_clients = 64;
@@ -405,6 +407,13 @@ static int onramp_init(struct Qdisc *sch, struct nlattr *opt)
 				onramp_free(client_queue->flow_table);
 				return -ENOMEM;
 			}
+			for (j = 0; j < q->max_flows; j++) {
+			        client_queue->flow_table[j].head = NULL;
+			        client_queue->flow_table[j].tail = NULL;
+			        client_queue->flow_table[j].attained_service = 0;
+			        client_queue->flow_table[j].flow_id = j;
+			}
+			client_queue->flow_queue_tree = RB_ROOT;
 			client_queue->empty = 1;
 		}
 	}
