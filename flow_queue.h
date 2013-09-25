@@ -10,7 +10,7 @@ inline struct sk_buff *dequeue_from_flow(struct onramp_flow_queue *flow_queue)
 {
 	struct sk_buff *skb = flow_queue->head;
 	flow_queue->head = skb->next;
-	flow_queue->attained_service -= qdisc_pkt_len(skb);
+	flow_queue->attained_service += qdisc_pkt_len(skb);
 	skb->next = NULL;
 	if (flow_queue->head == NULL) {
 		/* Reset Attained service */
