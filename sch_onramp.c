@@ -156,16 +156,13 @@ static inline struct sk_buff *dequeue_from_client(const struct onramp_sched_data
 	struct sk_buff* skb = dequeue_from_flow(&client_queue->flow_queue_tree,
 						&client_queue->flow_table[flow_id]);
 	/* Check all flows to see if the queue is now empty */
-	int i = 0;
-	for (i = 0; i < q->max_flows; i++) {
-		if (client_queue->flow_table[i].head) {
-			/* non-empty */
-			client_queue->empty = 0;
-			return skb;
-		}
+	/* At this point, rb-tree is populated iff
+	   at least one flow queue is non-empty */
+	if (rb_first(&client_queue->flow_queue_tree) != NULL) {
+		client_queue->empty = 0; /* Not empty */
+	} else {
+		client_queue->empty = 1;
 	}
-	/* All constituent flows are empty */
-	client_queue->empty = 1;
 	return skb;
 }
 
