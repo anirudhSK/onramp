@@ -47,7 +47,11 @@ struct onramp_sched_data {
 static int pick_flow_from_client(const struct onramp_sched_data *q,
 				 const struct onramp_client_queue *client_queue)
 {
-	return pick_flow(&client_queue->flow_queue_tree);
+	if (rb_first(&client_queue->flow_queue_tree) == NULL) {
+		return -1;
+	} else {
+		return pick_flow(&client_queue->flow_queue_tree);
+	}
 }
 
 /* Converse of the above, pick the flow with most
