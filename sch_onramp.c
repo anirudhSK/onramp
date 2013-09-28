@@ -10,11 +10,14 @@
 #include <linux/jhash.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
+#include <net/ip.h>
 #include <net/netlink.h>
 #include <net/pkt_sched.h>
-#include <net/flow_keys.h>
 #include <linux/rbtree.h>
 #include "flow_queue.h"
+
+/* QUEUE LIMIT */
+#define ONRAMP_LIMIT 10240
 
 /* Structure representing per-client queues */
 struct onramp_client_queue {
@@ -89,13 +92,42 @@ static int pick_most_serviced_flow(const struct onramp_sched_data *q,
 static unsigned int onramp_flow_hash(const struct onramp_sched_data *q,
 				     const struct sk_buff *skb)
 {
-	struct flow_keys keys;
-	unsigned int hash;
+	u32 hash;
+	u8 ip_proto;
 
-	skb_flow_dissect(skb, &keys);
-	hash = jhash_2words((__force u32)keys.ports,
-			    (__force u32)keys.ip_proto,
-			    q->perturbation);
+	switch (skb->protocol) {
+	case htons(ETH_P_IP): {
+		const struct iphdr *iph = ip_hdr(skb);
+		ip_proto = iph->protocol;
+		switch (ip_proto) {
+		case IPPROTO_TCP: {
+			const struct tcphdr *tcph = tcp_hdr(skb);
+			hash = jhash_3words(tcph->source, tcph->dest, ip_proto,
+					    q->perturbation);
+			break;
+		}
+		case IPPROTO_UDP: {
+			const struct udphdr *udph = udp_hdr(skb);
+			hash = jhash_3words(udph->source, udph->dest, ip_proto,
+					    q->perturbation);
+			break;
+		}
+		default: {
+			hash = jhash_3words((unsigned long)skb_dst(skb) ^ skb->protocol,
+					    (unsigned long)skb->sk,
+					    ip_proto,
+					    q->perturbation);
+			break;
+		}
+		}
+	}
+	default: {
+		hash = jhash_3words((unsigned long)skb_dst(skb) ^ skb->protocol,
+				    (unsigned long)skb->sk,
+				    ip_proto,
+				    q->perturbation);
+	}
+	}
 	printk("Flow hash value is %u\n", hash);
 	return ((u64)hash * q->max_flows) >> 32;
 }
@@ -105,13 +137,22 @@ static unsigned int onramp_flow_hash(const struct onramp_sched_data *q,
 static unsigned int onramp_client_hash(const struct onramp_sched_data *q,
 				       const struct sk_buff *skb)
 {
-	struct flow_keys keys;
-	unsigned int hash;
+	u32 hash;
 
-	skb_flow_dissect(skb, &keys);
-	hash = jhash_2words((__force u32)keys.dst,
-			    (__force u32)keys.ip_proto,
-			    q->perturbation);
+	switch (skb->protocol) {
+	case htons(ETH_P_IP): {
+		const struct iphdr *iph = ip_hdr(skb);
+		hash = jhash_2words(iph->saddr, iph->daddr,
+			   	    q->perturbation);
+		break;
+	}
+	default: {
+		hash = jhash_2words((unsigned long)skb_dst(skb) ^ skb->protocol,		                    (unsigned long)skb->sk,
+				    q->perturbation);
+
+	}
+	}
+
 	printk("Client hash value is %u\n", hash);
 	return ((u64)hash * q->max_clients) >> 32;
 }
@@ -250,7 +291,7 @@ static int onramp_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 		client_queue->dropped = 0;
 		client_queue->empty   = 0;
 	}
-	if (++sch->q.qlen <= sch->limit)
+	if (++sch->q.qlen <= ONRAMP_LIMIT)
 		return NET_XMIT_SUCCESS;
 
 	q->drop_overlimit++;
@@ -315,7 +356,6 @@ begin:
 		list_del_init(&client_queue->pkt_chain);
 		goto begin;
 	}
-	qdisc_bstats_update(sch, skb);
 	client_queue->deficit -= qdisc_pkt_len(skb);
 	/* We cant call qdisc_tree_decrease_qlen() if our qlen is 0,
 	 * or HTB crashes. Defer it for next round.
@@ -345,9 +385,6 @@ static int onramp_change(struct Qdisc *sch, struct nlattr *opt)
 static void *onramp_zalloc(size_t sz)
 {
 	void *ptr = kzalloc(sz, GFP_KERNEL | __GFP_NOWARN);
-
-	if (!ptr)
-		ptr = vzalloc(sz);
 	return ptr;
 }
 
@@ -375,7 +412,6 @@ static int onramp_init(struct Qdisc *sch, struct nlattr *opt)
 	struct onramp_sched_data *q = qdisc_priv(sch);
 	int i, j;
 
-	sch->limit = 10*1024;
 	q->max_clients = 64;
 	q->max_flows   = 64;
 	q->quantum = psched_mtu(qdisc_dev(sch));
