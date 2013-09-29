@@ -2,9 +2,12 @@
 #include <linux/skbuff.h>
 #include <net/pkt_sched.h>
 
-static int onramp_enqueue(struct sk_buff *skb, struct Qdisc *sch) { printk("Enqueueing\n"); return 0; }
+static int onramp_enqueue(struct sk_buff *skb, struct Qdisc *sch) {
+//	qdisc_drop(skb, sch);
+	return NET_XMIT_SUCCESS;
+}
 
-static struct sk_buff *onramp_dequeue(struct Qdisc *sch) { printk("Dequeueing\n"); return NULL; }
+static struct sk_buff *onramp_dequeue(struct Qdisc *sch) { return NULL; }
 
 static struct Qdisc_ops onramp_qdisc_ops __read_mostly = {
 	.id		=	"onramp",
