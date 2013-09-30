@@ -81,9 +81,10 @@ int insert_flow(struct rb_root *root, struct onramp_flow_queue* flow_queue)
                 parent = *new_pos;
 		if (result < 0) {
 			new_pos = &((*new_pos)->rb_left);
-                } else if (result > 1) {
+                } else if (result > 0) {
                         new_pos = &((*new_pos)->rb_right);
                 } else {
+                        panic("Flow already exists, shutting down!!\n");
                         return 1;
                 }
         }
