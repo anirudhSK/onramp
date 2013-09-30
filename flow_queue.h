@@ -24,4 +24,5 @@ inline void enqueue_into_flow(struct rb_root* flow_queue_tree,
 /* Pick LAS flow */
 u16 pick_flow(const struct rb_root *root);
 
+inline void iterate(struct rb_root* rb_tree);
 #endif  // FLOW_QUEUE_H_

@@ -51,3 +51,10 @@ u16 pick_flow(const struct rb_root *root)
 {
         return (container_of(rb_first(root), struct onramp_flow_queue, node)->flow_id);
 }
+
+inline void iterate(struct rb_root *rb_tree) {
+	struct rb_node *node;
+	for (node = rb_first(rb_tree); node; node = rb_next(node))
+		printk("rbtree key=%d  ", rb_entry(node, struct onramp_flow_queue, node)->flow_id);
+	printk("\n");
+}
