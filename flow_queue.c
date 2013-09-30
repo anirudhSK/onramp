@@ -37,6 +37,7 @@ inline void enqueue_into_flow(struct rb_root* flow_queue_tree,
 	if (flow_queue->head == NULL) {
 		flow_queue->head = skb;
 		/* Enqueueing an empty flow, insert into RB tree */
+		flow_queue->attained_service = 0;
 		insert_flow(flow_queue_tree, flow_queue);
 	} else {
 		flow_queue->tail->next = skb;
