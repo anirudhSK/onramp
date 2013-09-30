@@ -114,7 +114,7 @@ static unsigned int onramp_flow_hash(const struct onramp_sched_data *q,
 	default: {
 		hash = jhash_3words((unsigned long)skb_dst(skb) ^ skb->protocol,
 				    (unsigned long)skb->sk,
-				    ip_proto,
+				    skb->protocol,
 				    q->perturbation);
 	}
 	}
